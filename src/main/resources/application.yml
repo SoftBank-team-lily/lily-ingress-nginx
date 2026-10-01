@@ -1,0 +1,18 @@
+spring:
+  application:
+    name: lily-ingress
+
+server:
+  # builder 8070, cicd 8090, observer 8095 와 겹치지 않게 둔다
+  port: 8075
+
+lily:
+  ingress:
+    # 호스트를 지정하지 않은 앱의 기본 주소 {app}.{domain}
+    domain: apps.lilycloud.kr
+    # 응답 url 의 scheme. ALB 가 HTTPS 를 끝내므로 https
+    url-scheme: https
+    # 만드는 Ingress 를 처리할 컨트롤러. 자체 컨트롤러로 바꾸면 이 값만 바꾼다
+    ingress-class: nginx
+    # 비우면 인증 없이 받는다 (로컬 실행용). 클러스터에서는 Secret 으로 넣는다
+    api-token: ${LILY_INGRESS_API_TOKEN:}

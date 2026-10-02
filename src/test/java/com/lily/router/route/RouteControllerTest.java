@@ -54,7 +54,7 @@ class RouteControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"serviceName\":\"blog-svc\",\"servicePort\":80}"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.url").value("https://blog.apps.lilycloud.kr"))
+                .andExpect(jsonPath("$.url").value("https://blog.lilycloud.kr"))
                 .andExpect(jsonPath("$.backends[0].node").value("lily-worker-1"));
     }
 
@@ -82,7 +82,9 @@ class RouteControllerTest {
 
         mvc.perform(get("/api/v1/routes/default/nope").header("Authorization", AUTH))
                 .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.code").value("ROUTE_NOT_FOUND"));
+                .andExpect(jsonPath("$.code").value("ROUTE_NOT_FOUND"))
+                .andExpect(jsonPath("$.message").value("no"))
+                .andExpect(jsonPath("$.timestamp").isNotEmpty());
         mvc.perform(put("/api/v1/routes/default/dup").header("Authorization", AUTH)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"serviceName\":\"dup-svc\"}"))
@@ -92,16 +94,19 @@ class RouteControllerTest {
 
     @Test
     void resolveHostWithDots() throws Exception {
-        when(routes.findByHost("blog.apps.lilycloud.kr")).thenReturn(route());
+        when(routes.findByHost("blog.lilycloud.kr")).thenReturn(route());
 
-        mvc.perform(get("/api/v1/hosts/blog.apps.lilycloud.kr").header("Authorization", AUTH))
+        mvc.perform(get("/api/v1/hosts/blog.lilycloud.kr").header("Authorization", AUTH))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.app").value("blog"));
     }
 
     @Test
     void apiNeedsToken() throws Exception {
-        mvc.perform(get("/api/v1/routes")).andExpect(status().isUnauthorized());
+        mvc.perform(get("/api/v1/routes"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("UNAUTHORIZED"))
+                .andExpect(jsonPath("$.timestamp").isNotEmpty());
         mvc.perform(get("/api/v1/routes").header("Authorization", "Bearer wrong"))
                 .andExpect(status().isUnauthorized());
     }
@@ -123,7 +128,7 @@ class RouteControllerTest {
 
     @Test
     void listPassesNamespaceFilter() throws Exception {
-        when(routes.list("default")).thenReturn(List.of(route()));
+        when(routes.list("default", false)).thenReturn(List.of(route()));
 
         mvc.perform(get("/api/v1/routes").param("namespace", "default").header("Authorization", AUTH))
                 .andExpect(status().isOk())
@@ -133,7 +138,7 @@ class RouteControllerTest {
     @Test
     void hostEndpoints() throws Exception {
         when(routes.addHost("default", "blog", "blog.43.200.152.53.nip.io")).thenReturn(route());
-        when(routes.removeHost("default", "blog", "blog.apps.lilycloud.kr"))
+        when(routes.removeHost("default", "blog", "blog.lilycloud.kr"))
                 .thenThrow(new IllegalArgumentException("기본 주소는 지울 수 없다"));
 
         mvc.perform(post("/api/v1/routes/default/blog/hosts").header("Authorization", AUTH)
@@ -144,7 +149,7 @@ class RouteControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"host\":\"Not A Host\"}"))
                 .andExpect(status().isBadRequest());
-        mvc.perform(delete("/api/v1/routes/default/blog/hosts/blog.apps.lilycloud.kr").header("Authorization", AUTH))
+        mvc.perform(delete("/api/v1/routes/default/blog/hosts/blog.lilycloud.kr").header("Authorization", AUTH))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("INVALID_REQUEST"));
     }
@@ -164,6 +169,30 @@ class RouteControllerTest {
                 .andExpect(status().isBadRequest());
         mvc.perform(delete("/api/v1/routes/default/blog/canary").header("Authorization", AUTH))
                 .andExpect(status().isOk());
+    }
+
+    @Test
+    void canaryWeightZeroIsAllowed() throws Exception {
+        when(routes.openCanary(eq("default"), eq("blog"), any())).thenReturn(route());
+
+        mvc.perform(put("/api/v1/routes/default/blog/canary").header("Authorization", AUTH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"serviceName\":\"blog-canary-svc\",\"weight\":0}"))
+                .andExpect(status().isOk());
+        mvc.perform(put("/api/v1/routes/default/blog/canary").header("Authorization", AUTH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"serviceName\":\"blog-canary-svc\",\"weight\":-1}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void listCanaryOnly() throws Exception {
+        when(routes.list(null, true)).thenReturn(List.of(route()));
+
+        mvc.perform(get("/api/v1/routes").param("canary", "true").header("Authorization", AUTH))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].app").value("blog"));
+        verify(routes).list(null, true);
     }
 
     @Test
@@ -187,7 +216,7 @@ class RouteControllerTest {
 
     @Test
     void kubernetesFailureIs502() throws Exception {
-        when(routes.list(null)).thenThrow(new KubernetesClientException("connection refused"));
+        when(routes.list(null, false)).thenThrow(new KubernetesClientException("connection refused"));
 
         mvc.perform(get("/api/v1/routes").header("Authorization", AUTH))
                 .andExpect(status().isBadGateway())
@@ -195,8 +224,8 @@ class RouteControllerTest {
     }
 
     private static Route route() {
-        return new Route("default", "blog", "https://blog.apps.lilycloud.kr", "blog.apps.lilycloud.kr",
-                List.of("blog.apps.lilycloud.kr"), "blog-svc", 80, List.of(PathRule.ROOT), null, null,
+        return new Route("default", "blog", "https://blog.lilycloud.kr", "blog.lilycloud.kr",
+                List.of("blog.lilycloud.kr"), "blog-svc", 80, List.of(PathRule.ROOT), null, null,
                 null, List.of(new Backend("blog-blue-7d9", "10.42.1.7", "lily-worker-1", true)),
                 Instant.parse("2026-10-01T07:00:00Z"));
     }

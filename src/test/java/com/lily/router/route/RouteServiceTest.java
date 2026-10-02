@@ -15,9 +15,12 @@ import io.fabric8.kubernetes.api.model.discovery.v1.EndpointSliceBuilder;
 import io.fabric8.kubernetes.api.model.networking.v1.Ingress;
 import io.fabric8.kubernetes.api.model.networking.v1.IngressBuilder;
 import io.fabric8.kubernetes.api.model.networking.v1.IngressRule;
+import io.fabric8.kubernetes.api.model.networking.v1.IngressTLSBuilder;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.server.mock.EnableKubernetesMockClient;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -29,15 +32,15 @@ class RouteServiceTest {
 
     @BeforeEach
     void setUp() {
-        routes = new RouteService(client, new RouterProperties("apps.lilycloud.kr", "https", "nginx", ""));
+        routes = new RouteService(client, new RouterProperties("lilycloud.kr", "https", "nginx", ""));
     }
 
     @Test
     void registerCreatesManagedIngressWithDefaultHost() {
         Route route = routes.register("default", "blog", request("blog-svc", null));
 
-        assertThat(route.url()).isEqualTo("https://blog.apps.lilycloud.kr");
-        assertThat(route.hosts()).containsExactly("blog.apps.lilycloud.kr");
+        assertThat(route.url()).isEqualTo("https://blog.lilycloud.kr");
+        assertThat(route.hosts()).containsExactly("blog.lilycloud.kr");
         Ingress ingress = ingress("default", "blog-ingress");
         assertThat(ingress.getMetadata().getLabels())
                 .containsEntry("app.kubernetes.io/managed-by", "lily-router")
@@ -52,13 +55,66 @@ class RouteServiceTest {
     void registerAdoptsHostsOfIngressMadeByOthers() {
         // lily-cicd NginxIngressRouter 가 만들고 사람이 nip.io 를 손으로 추가한 상태
         client.network().v1().ingresses().inNamespace("default").resource(unmanaged("default", "blog-ingress",
-                "blog.apps.lilycloud.kr", "blog.43.200.152.53.nip.io")).create();
+                "blog.lilycloud.kr", "blog.43.200.152.53.nip.io")).create();
 
         Route route = routes.register("default", "blog", request("blog-svc", null));
 
-        assertThat(route.hosts()).containsExactly("blog.apps.lilycloud.kr", "blog.43.200.152.53.nip.io");
+        assertThat(route.hosts()).containsExactly("blog.lilycloud.kr", "blog.43.200.152.53.nip.io");
         assertThat(hosts(ingress("default", "blog-ingress")))
-                .containsExactly("blog.apps.lilycloud.kr", "blog.43.200.152.53.nip.io");
+                .containsExactly("blog.lilycloud.kr", "blog.43.200.152.53.nip.io");
+    }
+
+    @Test
+    void adoptionKeepsTlsAndAnnotationsAcrossRedeploys() {
+        // lily-cicd NginxIngressRouter 는 다른 호스트·TLS·어노테이션을 유지하므로 누가 넣어 둔 값이 있을 수 있다
+        Ingress manual = unmanaged("default", "blog-ingress", "blog.lilycloud.kr", "blog.apps.lilycloud.kr");
+        manual.getMetadata().setAnnotations(new HashMap<>(Map.of(
+                "kubernetes.io/ingress.class", "nginx",
+                "kubectl.kubernetes.io/last-applied-configuration", "{}",
+                "nginx.ingress.kubernetes.io/proxy-body-size", "20m")));
+        manual.getSpec().setTls(List.of(new IngressTLSBuilder()
+                .withHosts("blog.lilycloud.kr").withSecretName("blog-tls").build()));
+        client.network().v1().ingresses().inNamespace("default").resource(manual).create();
+
+        routes.register("default", "blog", request("blog-svc", null));
+        routes.register("default", "blog", request("blog-svc", null));
+
+        Ingress ingress = ingress("default", "blog-ingress");
+        assertThat(ingress.getMetadata().getAnnotations())
+                .containsEntry("nginx.ingress.kubernetes.io/proxy-body-size", "20m")
+                .doesNotContainKeys("kubernetes.io/ingress.class",
+                        "kubectl.kubernetes.io/last-applied-configuration");
+        assertThat(ingress.getSpec().getTls()).singleElement().satisfies(tls -> {
+            assertThat(tls.getSecretName()).isEqualTo("blog-tls");
+            assertThat(tls.getHosts()).containsExactly("blog.lilycloud.kr");
+        });
+        assertThat(hosts(ingress)).containsExactly("blog.lilycloud.kr", "blog.apps.lilycloud.kr");
+    }
+
+    @Test
+    void requestTimeoutOverridesAdoptedTimeout() {
+        Ingress manual = unmanaged("default", "blog-ingress", "blog.lilycloud.kr");
+        manual.getMetadata().setAnnotations(new HashMap<>(Map.of(
+                "nginx.ingress.kubernetes.io/proxy-read-timeout", "30")));
+        client.network().v1().ingresses().inNamespace("default").resource(manual).create();
+
+        routes.register("default", "blog", new RegisterRouteRequest("blog-svc", null, null, null, 3600, null));
+
+        assertThat(ingress("default", "blog-ingress").getMetadata().getAnnotations())
+                .containsEntry("nginx.ingress.kubernetes.io/proxy-read-timeout", "3600");
+    }
+
+    @Test
+    void canaryWeightZeroAndCanaryOnlyList() {
+        routes.register("default", "blog", request("blog-svc", null));
+        routes.register("default", "blog2", request("blog2-svc", null));
+
+        routes.openCanary("default", "blog", new CanaryRequest("blog-canary-svc", null, 0));
+
+        assertThat(ingress("default", "blog-canary-ingress").getMetadata().getAnnotations())
+                .containsEntry("nginx.ingress.kubernetes.io/canary-weight", "0");
+        assertThat(routes.list(null, true)).extracting(Route::app).containsExactly("blog");
+        assertThat(routes.list(null, false)).extracting(Route::app).containsExactly("blog", "blog2");
     }
 
     @Test
@@ -70,7 +126,7 @@ class RouteServiceTest {
                 new RegisterRouteRequest("blog-svc", 80, null, null, null,
                         new DeploymentInfo("blue-green", "green", "v2", "img:v2", List.of("lily-worker-1"), "ACTIVE")));
 
-        assertThat(route.hosts()).containsExactly("blog.apps.lilycloud.kr", "blog.43.200.152.53.nip.io");
+        assertThat(route.hosts()).containsExactly("blog.lilycloud.kr", "blog.43.200.152.53.nip.io");
         assertThat(route.deployment().slot()).isEqualTo("green");
     }
 
@@ -103,7 +159,7 @@ class RouteServiceTest {
     @Test
     void hostUsedByAnotherIngressIsConflict() {
         client.network().v1().ingresses().inNamespace("default")
-                .resource(unmanaged("default", "other-ingress", "blog.apps.lilycloud.kr")).create();
+                .resource(unmanaged("default", "other-ingress", "blog.lilycloud.kr")).create();
 
         assertThatThrownBy(() -> routes.register("default", "blog", request("blog-svc", null)))
                 .isInstanceOf(RouteConflictException.class)
@@ -123,7 +179,7 @@ class RouteServiceTest {
         assertThat(canary.getMetadata().getAnnotations())
                 .containsEntry("nginx.ingress.kubernetes.io/canary", "true")
                 .containsEntry("nginx.ingress.kubernetes.io/canary-weight", "10");
-        assertThat(hosts(canary)).containsExactly("blog.apps.lilycloud.kr", "blog.43.200.152.53.nip.io");
+        assertThat(hosts(canary)).containsExactly("blog.lilycloud.kr", "blog.43.200.152.53.nip.io");
 
         Route closed = routes.closeCanary("default", "blog");
 
@@ -166,7 +222,7 @@ class RouteServiceTest {
                 .resource(unmanaged("default", "manual-ingress", "manual.lilycloud.kr")).create();
 
         assertThat(routes.list(null)).extracting(Route::app).containsExactly("blog", "blog2");
-        assertThat(routes.findByHost("blog2.apps.lilycloud.kr").serviceName()).isEqualTo("blog2-svc");
+        assertThat(routes.findByHost("blog2.lilycloud.kr").serviceName()).isEqualTo("blog2-svc");
         assertThatThrownBy(() -> routes.findByHost("manual.lilycloud.kr"))
                 .isInstanceOf(RouteNotFoundException.class);
     }
@@ -179,7 +235,7 @@ class RouteServiceTest {
                 new DeploymentInfo("blue-green", "blue", "v3", "img:v3", null, "DEPLOYING"));
 
         assertThat(route.deployment().status()).isEqualTo("DEPLOYING");
-        assertThat(route.hosts()).containsExactly("blog.apps.lilycloud.kr");
+        assertThat(route.hosts()).containsExactly("blog.lilycloud.kr");
     }
 
     @Test
@@ -187,12 +243,12 @@ class RouteServiceTest {
         routes.register("default", "blog", request("blog-svc", null));
         routes.addHost("default", "blog", "blog.43.200.152.53.nip.io");
 
-        assertThatThrownBy(() -> routes.removeHost("default", "blog", "blog.apps.lilycloud.kr"))
+        assertThatThrownBy(() -> routes.removeHost("default", "blog", "blog.lilycloud.kr"))
                 .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> routes.removeHost("default", "blog", "nope.lilycloud.kr"))
                 .isInstanceOf(RouteNotFoundException.class);
         assertThat(routes.removeHost("default", "blog", "blog.43.200.152.53.nip.io").hosts())
-                .containsExactly("blog.apps.lilycloud.kr");
+                .containsExactly("blog.lilycloud.kr");
     }
 
     @Test
@@ -209,7 +265,7 @@ class RouteServiceTest {
     @Test
     void unmanagedIngressIsNotARoute() {
         client.network().v1().ingresses().inNamespace("default")
-                .resource(unmanaged("default", "blog-ingress", "blog.apps.lilycloud.kr")).create();
+                .resource(unmanaged("default", "blog-ingress", "blog.lilycloud.kr")).create();
 
         assertThatThrownBy(() -> routes.get("default", "blog")).isInstanceOf(RouteNotFoundException.class);
     }

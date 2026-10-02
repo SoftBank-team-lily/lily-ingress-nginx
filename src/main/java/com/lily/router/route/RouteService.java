@@ -74,12 +74,20 @@ public class RouteService {
                     ? app + "." + properties.domain()
                     : request.host();
             List<String> extra = new ArrayList<>();
+            Map<String, String> keptAnnotations = Map.of();
+            List<RouteState.TlsRule> tls = List.of();
             if (existing != null && IngressSpecs.managed(existing)) {
-                extra.addAll(readState(existing).extraHosts());
+                RouteState previous = readState(existing);
+                extra.addAll(previous.extraHosts());
+                keptAnnotations = previous.keptAnnotations();
+                tls = previous.tls();
             } else if (existing != null) {
+                // lily-cicd NginxIngressRouter 나 사람이 만든 Ingress. 호스트·어노테이션·TLS 를 잃지 않게 이어받는다
                 extra.addAll(hostsOf(existing));
-                log.info("adopting unmanaged ingress. namespace={} name={} hosts={}",
-                        namespace, existing.getMetadata().getName(), extra);
+                keptAnnotations = IngressSpecs.adoptableAnnotations(existing);
+                tls = IngressSpecs.adoptableTls(existing);
+                log.info("adopting unmanaged ingress. namespace={} name={} hosts={} annotations={} tls={}",
+                        namespace, existing.getMetadata().getName(), extra, keptAnnotations.keySet(), tls.size());
             }
             extra.remove(primary);
             List<PathRule> paths = request.paths() == null || request.paths().isEmpty()
@@ -92,6 +100,8 @@ public class RouteService {
                     paths,
                     request.timeoutSeconds(),
                     request.deployment(),
+                    keptAnnotations,
+                    tls,
                     Instant.now());
             apply(namespace, app, state);
             return view(namespace, app, state);
@@ -105,6 +115,14 @@ public class RouteService {
 
     /** @param namespace null 이면 전체 */
     public List<Route> list(String namespace) {
+        return list(namespace, false);
+    }
+
+    /**
+     * @param namespace  null 이면 전체
+     * @param canaryOnly true 면 canary 가 열려 있는 라우트만. 배포 모듈이 재시작 뒤 남은 canary 를 정리할 때 쓴다
+     */
+    public List<Route> list(String namespace, boolean canaryOnly) {
         var ingresses = namespace == null || namespace.isBlank()
                 ? k8s.network().v1().ingresses().inAnyNamespace()
                         .withLabel(IngressSpecs.ROLE_LABEL, IngressSpecs.ROLE_MAIN).list()
@@ -113,6 +131,7 @@ public class RouteService {
         return ingresses.getItems().stream()
                 .filter(IngressSpecs::managed)
                 .map(ingress -> view(ingress.getMetadata().getNamespace(), appOf(ingress), readState(ingress)))
+                .filter(route -> !canaryOnly || route.canary() != null)
                 .sorted(Comparator.comparing(Route::namespace).thenComparing(Route::app))
                 .toList();
     }

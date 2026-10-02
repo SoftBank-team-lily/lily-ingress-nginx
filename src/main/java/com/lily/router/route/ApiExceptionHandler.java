@@ -54,6 +54,6 @@ public class ApiExceptionHandler {
     }
 
     private static ResponseEntity<ErrorResponse> body(HttpStatus status, String code, String message) {
-        return ResponseEntity.status(status).body(new ErrorResponse(code, message));
+        return ResponseEntity.status(status).body(ErrorResponse.of(code, message));
     }
 }

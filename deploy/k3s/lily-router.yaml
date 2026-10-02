@@ -69,7 +69,7 @@ spec:
               containerPort: 8075
           env:
             - name: LILY_ROUTER_DOMAIN
-              value: apps.lilycloud.kr
+              value: lilycloud.kr
             - name: LILY_ROUTER_URL_SCHEME
               value: https
             - name: LILY_ROUTER_INGRESS_CLASS

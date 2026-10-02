@@ -11,6 +11,9 @@
 | 형식 | `Content-Type: application/json` |
 | 인증 | `/api/` 아래 전부 `Authorization: Bearer {LILY_ROUTER_API_TOKEN}`. 서버에 토큰이 설정되지 않았으면 검사하지 않음 |
 | 경로 변수 | `{namespace}`: 소문자·숫자·하이픈, 63자 이하 / `{app}`: 소문자·숫자·하이픈, 48자 이하 / `{host}`: DNS 이름 |
+| 멱등성 | `PUT`·`DELETE` 는 같은 요청을 다시 보내도 결과가 같습니다. 응답이 끊기면 다시 보내면 됩니다 |
+| 반영 시점 | `200`/`204` 는 **Ingress 리소스를 k8s 에 쓴 시점**입니다. ingress-nginx 가 읽어 트래픽에 반영하기까지 보통 수 초 걸립니다. 반영을 확인해야 하면 실제 주소로 요청해 확인합니다 |
+| 재시도 | `5xx` 는 다시 보내도 됩니다. `4xx` 는 요청을 고쳐야 합니다 |
 
 ## 엔드포인트 목록
 
@@ -42,7 +45,7 @@
 |---|---|---|---|
 | `serviceName` | string | O | 같은 namespace 의 Service 이름 |
 | `servicePort` | int | | 1~65535. 기본 `80` |
-| `host` | string | | DNS 이름. 기본 `{app}.apps.lilycloud.kr` |
+| `host` | string | | DNS 이름. 기본 `{app}.lilycloud.kr` |
 | `paths` | `PathRule[]` | | 기본 `[{"path":"/","pathType":"Prefix"}]` |
 | `timeoutSeconds` | int | | 1~86400. 프록시 읽기·쓰기 타임아웃. 기본은 컨트롤러 값 (60초) |
 | `deployment` | `DeploymentInfo` | | 조회용으로만 보관 |
@@ -62,7 +65,8 @@ curl -X PUT http://lily-router.lily-system.svc/api/v1/routes/default/blog \
 
 동작:
 - `host` 가 바뀌면 이전 기본 주소는 빠지고, 추가 주소(#6)는 그대로 남습니다
-- lily-router 가 만들지 않은 `{app}-ingress` 가 이미 있으면 그 호스트를 추가 주소로 이어받습니다
+- lily-router 가 만들지 않은 `{app}-ingress` 가 이미 있으면 그 호스트를 추가 주소로, TLS 와 어노테이션도 그대로 이어받습니다. 이어받은 값은 이후 재등록해도 남습니다
+  (빼는 것: `kubernetes.io/ingress.class`, `kubectl.kubernetes.io/last-applied-configuration`, `lily.io/*`. `timeoutSeconds` 를 주면 이어받은 타임아웃보다 우선)
 - canary 가 열려 있으면 canary 도 새 호스트·경로를 따라갑니다
 
 | 실패 | code | 예 |
@@ -77,10 +81,12 @@ curl -X PUT http://lily-router.lily-system.svc/api/v1/routes/default/blog \
 
 `GET /api/v1/routes`
 `GET /api/v1/routes?namespace=default`
+`GET /api/v1/routes?canary=true`
 
 | 쿼리 | 필수 | 설명 |
 |---|---|---|
 | `namespace` | | 비우면 전체 namespace |
+| `canary` | | `true` 면 canary 가 열려 있는 라우트만. 기본 `false`. 배포 모듈이 재시작 뒤 남은 canary 를 정리할 때 씁니다 |
 
 **응답** `200` [`Route`](#route)`[]`. `namespace`, `app` 순으로 정렬. lily-router 가 관리하는 라우트만 포함
 
@@ -194,7 +200,7 @@ DELETE /api/v1/routes/default/blog/hosts/blog.43.200.152.53.nip.io
 |---|---|---|---|
 | `serviceName` | string | O | 새 버전 Service |
 | `servicePort` | int | | 1~65535. 기본 `80` |
-| `weight` | int | O | 1~100 (%) |
+| `weight` | int | O | 0~100 (%). `0` 이면 입구만 만들고 트래픽은 보내지 않음. 단계적으로 올릴 때는 같은 요청을 weight 만 바꿔 다시 보냄 |
 
 ```json
 { "serviceName": "blog-canary-svc", "weight": 10 }
@@ -226,7 +232,7 @@ DELETE /api/v1/routes/default/blog/hosts/blog.43.200.152.53.nip.io
 `GET /api/v1/hosts/{host}`
 
 ```
-GET /api/v1/hosts/blog.apps.lilycloud.kr
+GET /api/v1/hosts/blog.lilycloud.kr
 ```
 
 기본 주소와 추가 주소 모두 찾습니다.
@@ -259,9 +265,9 @@ GET /api/v1/hosts/blog.apps.lilycloud.kr
 {
   "namespace": "default",
   "app": "blog",
-  "url": "https://blog.apps.lilycloud.kr",
-  "primaryHost": "blog.apps.lilycloud.kr",
-  "hosts": ["blog.apps.lilycloud.kr", "blog.43.200.152.53.nip.io"],
+  "url": "https://blog.lilycloud.kr",
+  "primaryHost": "blog.lilycloud.kr",
+  "hosts": ["blog.lilycloud.kr", "blog.43.200.152.53.nip.io"],
   "serviceName": "blog-svc",
   "servicePort": 80,
   "paths": [{ "path": "/", "pathType": "Prefix" }],
@@ -336,11 +342,17 @@ GET /api/v1/hosts/blog.apps.lilycloud.kr
 
 ## 오류
 
-모든 오류는 같은 형식입니다.
+모든 오류는 팀 공통 형식 `{timestamp, code, message}` 입니다.
 
 ```json
-{ "code": "ROUTE_NOT_FOUND", "message": "default/blog 라우트가 없다" }
+{ "timestamp": "2026-10-02T05:00:00.123Z", "code": "ROUTE_NOT_FOUND", "message": "default/blog 라우트가 없다" }
 ```
+
+| 필드 | 타입 | 설명 |
+|---|---|---|
+| `timestamp` | string (ISO-8601, UTC) | 오류를 만든 시각 |
+| `code` | string | 아래 표 |
+| `message` | string | 사람이 읽는 설명 |
 
 | HTTP | code | 언제 |
 |---|---|---|

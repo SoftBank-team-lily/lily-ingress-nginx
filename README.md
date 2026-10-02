@@ -64,7 +64,7 @@ DB 를 두지 않고 Ingress 자체에 기록합니다.
 
 | 환경변수 | 기본값 | 설명 |
 |---|---|---|
-| `LILY_ROUTER_DOMAIN` | `apps.lilycloud.kr` | 호스트를 안 주면 `{app}.{domain}` |
+| `LILY_ROUTER_DOMAIN` | `lilycloud.kr` | 호스트를 안 주면 `{app}.{domain}` |
 | `LILY_ROUTER_URL_SCHEME` | `https` | 응답 `url` 의 scheme (ALB 가 HTTPS 종료) |
 | `LILY_ROUTER_INGRESS_CLASS` | `nginx` | 만드는 Ingress 의 ingressClassName |
 | `LILY_ROUTER_API_TOKEN` | (없음) | `/api` Bearer 토큰. 비우면 인증 안 함 |

@@ -7,6 +7,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.time.Instant;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
@@ -44,6 +45,8 @@ public class ApiTokenFilter extends OncePerRequestFilter {
         }
         response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
-        response.getWriter().write("{\"code\":\"UNAUTHORIZED\",\"message\":\"Bearer 토큰이 없거나 다르다\"}");
+        // 필터는 MVC 밖이라 ApiExceptionHandler 를 거치지 않는다. 같은 형식으로 직접 쓴다
+        response.getWriter().write("{\"timestamp\":\"" + Instant.now()
+                + "\",\"code\":\"UNAUTHORIZED\",\"message\":\"Bearer 토큰이 없거나 다르다\"}");
     }
 }

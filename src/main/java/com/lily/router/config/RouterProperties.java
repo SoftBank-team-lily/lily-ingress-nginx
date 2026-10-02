@@ -11,7 +11,7 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  */
 @ConfigurationProperties(prefix = "lily.router")
 public record RouterProperties(
-        @DefaultValue("apps.lilycloud.kr") String domain,
+        @DefaultValue("lilycloud.kr") String domain,
         @DefaultValue("https") String urlScheme,
         @DefaultValue("nginx") String ingressClass,
         @DefaultValue("") String apiToken

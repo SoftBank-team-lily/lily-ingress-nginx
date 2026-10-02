@@ -8,9 +8,11 @@ import io.fabric8.kubernetes.api.model.networking.v1.Ingress;
 import io.fabric8.kubernetes.api.model.networking.v1.IngressBuilder;
 import io.fabric8.kubernetes.api.model.networking.v1.IngressRule;
 import io.fabric8.kubernetes.api.model.networking.v1.IngressRuleBuilder;
+import io.fabric8.kubernetes.api.model.networking.v1.IngressTLSBuilder;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * 라우트 원본을 Ingress 리소스로 바꾼다. 클러스터를 부르지 않는다.
@@ -33,6 +35,9 @@ final class IngressSpecs {
     static final String CANARY_WEIGHT = NGINX + "canary-weight";
     static final String READ_TIMEOUT = NGINX + "proxy-read-timeout";
     static final String SEND_TIMEOUT = NGINX + "proxy-send-timeout";
+    private static final Set<String> DROPPED_ON_ADOPT = Set.of(
+            "kubernetes.io/ingress.class",
+            "kubectl.kubernetes.io/last-applied-configuration");
 
     private IngressSpecs() {
     }
@@ -48,7 +53,8 @@ final class IngressSpecs {
     }
 
     static Ingress main(String namespace, String app, RouteState state, String ingressClass, String stateJson) {
-        Map<String, String> annotations = new LinkedHashMap<>();
+        // 이어받은 어노테이션이 먼저, lily-router 가 정하는 값이 나중 (같은 키면 lily-router 값)
+        Map<String, String> annotations = new LinkedHashMap<>(state.keptAnnotations());
         annotations.put(STATE_ANNOTATION, stateJson);
         if (state.timeoutSeconds() != null) {
             annotations.put(READ_TIMEOUT, String.valueOf(state.timeoutSeconds()));
@@ -64,8 +70,41 @@ final class IngressSpecs {
                 .withNewSpec()
                     .withIngressClassName(ingressClass)
                     .withRules(rules(state.hosts(), state.paths(), state.serviceName(), state.servicePort()))
+                    .withTls(state.tls().stream()
+                            .map(rule -> new IngressTLSBuilder()
+                                    .withHosts(rule.hosts())
+                                    .withSecretName(rule.secretName())
+                                    .build())
+                            .toList())
                 .endSpec()
                 .build();
+    }
+
+    /**
+     * 다른 주체가 만든 Ingress 를 이어받을 때 남길 어노테이션.
+     * 컨트롤러 지정(ingressClassName 으로 대신함)과 kubectl 이 붙이는 직전 적용본, lily-router 자기 값은 뺀다.
+     */
+    static Map<String, String> adoptableAnnotations(Ingress ingress) {
+        Map<String, String> kept = new LinkedHashMap<>();
+        Map<String, String> source = ingress.getMetadata().getAnnotations();
+        if (source == null) {
+            return kept;
+        }
+        source.forEach((key, value) -> {
+            if (!DROPPED_ON_ADOPT.contains(key) && !key.startsWith("lily.io/")) {
+                kept.put(key, value);
+            }
+        });
+        return kept;
+    }
+
+    static List<RouteState.TlsRule> adoptableTls(Ingress ingress) {
+        if (ingress.getSpec() == null || ingress.getSpec().getTls() == null) {
+            return List.of();
+        }
+        return ingress.getSpec().getTls().stream()
+                .map(tls -> new RouteState.TlsRule(tls.getHosts(), tls.getSecretName()))
+                .toList();
     }
 
     /**

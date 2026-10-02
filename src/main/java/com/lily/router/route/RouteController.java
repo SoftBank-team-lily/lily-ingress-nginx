@@ -45,10 +45,11 @@ public class RouteController {
         return routes.register(namespace, app, request);
     }
 
-    /** #2 라우트 목록. namespace 를 비우면 전체. 200 Route[] / 502 */
+    /** #2 라우트 목록. namespace 를 비우면 전체, canary=true 면 canary 가 열린 것만. 200 Route[] / 502 */
     @GetMapping("/routes")
-    public List<Route> list(@RequestParam(required = false) String namespace) {
-        return routes.list(namespace);
+    public List<Route> list(@RequestParam(required = false) String namespace,
+                            @RequestParam(defaultValue = "false") boolean canary) {
+        return routes.list(namespace, canary);
     }
 
     /** #3 라우트 조회. 200 Route / 400, 404 */

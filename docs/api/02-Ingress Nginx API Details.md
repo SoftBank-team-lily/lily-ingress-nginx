@@ -15,7 +15,7 @@
 ### 오류 응답
 
 ```json
-{ "code": "HOST_CONFLICT", "message": "host blog.apps.lilycloud.kr path / 는 이미 default/other-ingress 가 쓰고 있다" }
+{ "timestamp": "2026-10-02T05:00:00.123Z", "code": "HOST_CONFLICT", "message": "host blog.lilycloud.kr path / 는 이미 default/other-ingress 가 쓰고 있다" }
 ```
 
 | HTTP | code | 언제 |
@@ -34,13 +34,13 @@
 
 `PUT /api/v1/routes/{namespace}/{app}`
 
-배포 모듈이 트래픽 전환을 끝낸 뒤 부릅니다. 같은 요청을 여러 번 보내도 결과가 같습니다 (멱등).
+배포 모듈이 트래픽 전환을 끝낸 뒤 부릅니다. 같은 요청을 여러 번 보내도 결과가 같습니다 (멱등). `200` 은 Ingress 리소스를 k8s 에 쓴 시점이고, ingress-nginx 가 트래픽에 반영하기까지 보통 수 초 걸립니다.
 
 ```json
 {
   "serviceName": "blog-svc",          // 필수. 같은 namespace 의 Service
   "servicePort": 80,                  // 생략 시 80
-  "host": null,                       // 생략 시 {app}.apps.lilycloud.kr
+  "host": null,                       // 생략 시 {app}.lilycloud.kr
   "paths": [                          // 생략 시 "/" 전체
     { "path": "/api/burst", "pathType": "Prefix" },
     { "path": "/api/agents/connect", "pathType": "Exact" }
@@ -62,7 +62,7 @@
 규칙:
 - `host` 는 **기본 주소**입니다. 배포할 때마다 바뀔 수 있고, 바뀌면 이전 기본 주소는 빠집니다.
 - 추가 주소(`/hosts` 로 넣은 것)는 재배포해도 남습니다.
-- 처음 등록할 때 lily-router 가 만들지 않은 `{app}-ingress` 가 이미 있으면, 그 Ingress 의 호스트를 추가 주소로 이어받습니다 (lily-cicd 가 만든 Ingress 를 옮겨 올 때).
+- 처음 등록할 때 lily-router 가 만들지 않은 `{app}-ingress` 가 이미 있으면, 그 Ingress 의 호스트를 추가 주소로, TLS 와 어노테이션도 그대로 이어받습니다 (lily-cicd 가 만든 Ingress 를 옮겨 올 때).
 
 ### 배포 상태 갱신
 
@@ -79,7 +79,7 @@
 { "serviceName": "blog-canary-svc", "servicePort": 80, "weight": 10 }
 ```
 
-기본 라우트와 같은 호스트·경로로 들어온 요청 중 `weight`% 를 `serviceName` 으로 보냅니다.
+기본 라우트와 같은 호스트·경로로 들어온 요청 중 `weight`% (0~100) 를 `serviceName` 으로 보냅니다. `0` 이면 입구만 만들고, 단계적으로 올릴 때는 weight 만 바꿔 다시 보냅니다.
 라우트가 먼저 있어야 합니다 (없으면 404). 열려 있는 동안 라우트가 바뀌면 canary 도 따라갑니다.
 
 `DELETE /api/v1/routes/{namespace}/{app}/canary` 로 닫습니다. 열려 있지 않아도 200.
@@ -105,7 +105,7 @@ nip.io, 커스텀 도메인처럼 기본 주소 외에 받을 주소. 기본 주
 
 | 요청 | 응답 |
 |---|---|
-| `GET /api/v1/routes` | 전체 라우트 목록. `?namespace=default` 로 좁힘 |
+| `GET /api/v1/routes` | 전체 라우트 목록. `?namespace=default` 로 좁힘, `?canary=true` 면 canary 가 열린 것만 |
 | `GET /api/v1/routes/{namespace}/{app}` | 라우트 하나 |
 | `GET /api/v1/hosts/{host}` | 이 주소를 받는 라우트. 없으면 404 |
 
@@ -115,9 +115,9 @@ nip.io, 커스텀 도메인처럼 기본 주소 외에 받을 주소. 기본 주
 {
   "namespace": "default",
   "app": "blog",
-  "url": "https://blog.apps.lilycloud.kr",
-  "primaryHost": "blog.apps.lilycloud.kr",
-  "hosts": ["blog.apps.lilycloud.kr", "blog.43.200.152.53.nip.io"],
+  "url": "https://blog.lilycloud.kr",
+  "primaryHost": "blog.lilycloud.kr",
+  "hosts": ["blog.lilycloud.kr", "blog.43.200.152.53.nip.io"],
   "serviceName": "blog-svc",
   "servicePort": 80,
   "paths": [{ "path": "/", "pathType": "Prefix" }],
@@ -154,7 +154,7 @@ lily-cicd                                   lily-router
   │ DELETE .../blog/canary                      →  삭제
   │ Service selector → green
   │ PUT .../blog {blog-svc, deployment:{slot:green, status:ACTIVE}}
-  │                                         ←  { url: "https://blog.apps.lilycloud.kr", ... }
+  │                                         ←  { url: "https://blog.lilycloud.kr", ... }
   │ 응답의 url 을 배포 결과로 돌려준다
 ```
 

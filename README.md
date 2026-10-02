@@ -32,8 +32,10 @@ lily-router 는 앱별 라우트 원본(기본 주소 + 추가 주소)을 들고
 
 ## 문서
 
-- [docs/protocol.md](docs/protocol.md): 통신 규칙 (API, 요청·응답, 오류 코드, 배포 흐름 예시)
-- [docs/integration.md](docs/integration.md): lily-cicd·builder 연동 방법, 기존 Ingress 옮기기, 한계
+- [docs/01-Ingress Nginx 모듈화.md](<docs/01-Ingress Nginx 모듈화.md>): 배경, lily-cicd·builder 연동 방법, 기존 Ingress 옮기기, 한계
+- [docs/02-라우터 설계.md](<docs/02-라우터 설계.md>): 배치, 데이터, 모듈 간 흐름, 장애 처리, 보안, 검증 계획
+- [docs/api/01-Ingress Nginx API.md](<docs/api/01-Ingress Nginx API.md>): API 명세 (엔드포인트별 요청·응답·오류)
+- [docs/api/02-Ingress Nginx API Details.md](<docs/api/02-Ingress Nginx API Details.md>): 필드 규칙과 배포 흐름 예시
 
 ## API 요약
 
@@ -73,6 +75,7 @@ DB 를 두지 않고 Ingress 자체에 기록합니다.
 
 ```bash
 ./gradlew test                       # 단위 테스트 (fabric8 mock 서버, 클러스터 불필요)
+                                     # CicdContractTest: lily-cicd HttpTrafficRouter 가 보내는 요청 그대로
 ./gradlew bootRun                    # 로컬 실행 :8075. KUBECONFIG 의 클러스터에 붙는다
 ```
 
@@ -86,8 +89,11 @@ sudo kubectl apply -f deploy/k3s/lily-router.yaml
 
 ## 다음 할 일
 
-- [ ] lily-cicd 에 `HttpTrafficRouter` 붙이기 (cicd 담당자 합의, [integration.md](docs/integration.md) 1단계)
-- [ ] canary·조회도 lily-router 로 (2단계), builder `ClusterApps` 가 `url` 사용
+- [ ] lily-cicd 에 `HttpTrafficRouter` 붙이기 — 로컬 브랜치 `기능/router-연동` 에 구현, cicd 담당자 합의 후 PR
+      (`TrafficRouter` 에 canary·삭제·조회 추가, `lily.router.url` 이 있을 때만 켜짐)
+- [ ] builder `ClusterApps`, observer `KubernetesClusterSource` 가 `url` 사용
+- [ ] lily-web 배포 설정에 `INGRESS_API_URL=http://lily-router.lily-system.svc`
+- [ ] 로컬 k3d(1 server + 2 agent) 전체 파이프라인 검증 ([설계 10장](<docs/02-라우터 설계.md>))
 - [ ] cicd·builder 의 Ingress 쓰기 권한 제거 (3단계)
 - [ ] 기존 Ingress 옮기기, lily-loadbalancer `manifests/` 와 builder 의 중복 매니페스트 정리
 - [ ] 주소마다 다른 경로 지원 (지금은 라우트 하나의 모든 주소가 같은 경로)

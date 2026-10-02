@@ -1,0 +1,114 @@
+# lily-router 를 k3s 에 올리는 매니페스트.
+#
+# - 클러스터의 Ingress 를 쓰는 곳은 이 서비스 하나로 모은다. 다른 모듈은 HTTP 로 요청한다 (docs/protocol.md)
+# - 실제 프록시는 지금처럼 ingress-nginx 컨트롤러가 한다. 이 서비스는 Ingress 리소스만 관리한다
+# - 클러스터 내부 전용 (ClusterIP). 다른 모듈은 http://lily-router.lily-system.svc 로 부른다
+#
+# 적용 전에 토큰 Secret 을 만든다 (호출하는 모듈도 같은 값을 쓴다):
+#   kubectl -n lily-system create secret generic lily-router-token \
+#     --from-literal=LILY_ROUTER_API_TOKEN=$(openssl rand -hex 24)
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: lily-router
+  namespace: lily-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: lily-router
+rules:
+  # 앱마다 namespace 가 다를 수 있다. list 는 호스트 충돌 검사와 전체 조회에 쓴다
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # 라우트 조회 응답의 backends (파드가 뜬 노드, Ready 여부)
+  - apiGroups: ["discovery.k8s.io"]
+    resources: ["endpointslices"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: lily-router
+subjects:
+  - kind: ServiceAccount
+    name: lily-router
+    namespace: lily-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: lily-router
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lily-router
+  namespace: lily-system
+  labels:
+    app: lily-router
+spec:
+  # 같은 앱의 갱신을 프로세스 안에서 직렬화한다. 2 이상으로 올리지 않는다
+  replicas: 1
+  selector:
+    matchLabels:
+      app: lily-router
+  template:
+    metadata:
+      labels:
+        app: lily-router
+    spec:
+      serviceAccountName: lily-router
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: lily-router
+          # ECR 에 올린 이미지로 바꾼다
+          image: <ACCOUNT_ID>.dkr.ecr.ap-northeast-2.amazonaws.com/lily-router:latest
+          ports:
+            - name: http
+              containerPort: 8075
+          env:
+            - name: LILY_ROUTER_DOMAIN
+              value: apps.lilycloud.kr
+            - name: LILY_ROUTER_URL_SCHEME
+              value: https
+            - name: LILY_ROUTER_INGRESS_CLASS
+              value: nginx
+            - name: LILY_ROUTER_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: lily-router-token
+                  key: LILY_ROUTER_API_TOKEN
+          resources:
+            requests:
+              cpu: 50m
+              memory: 256Mi
+            limits:
+              memory: 384Mi
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: lily-router
+  namespace: lily-system
+spec:
+  type: ClusterIP
+  selector:
+    app: lily-router
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

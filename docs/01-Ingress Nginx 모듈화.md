@@ -6,7 +6,7 @@ CICD는 배포만을 진행하고 Ingress는 배포되고 있는 서비스명과
 
 코드를 살펴본 결과 CICD에서 k8s를 이용해서 배포되어야 할 EC2 인스턴스를 정하고 배포를 진행합니다.
 
-클러스터의 Ingress 를 쓰는 곳은 lily-ingress 하나가 되고, 다른 모듈은 [프로토콜](<api/02-Ingress Nginx API Details.md>)로 요청합니다.
+클러스터의 Ingress 를 쓰는 곳은 lily-router 하나가 되고, 다른 모듈은 [프로토콜](<api/02-Ingress Nginx API Details.md>)로 요청합니다.
 
 ## 지금 Ingress 를 다루는 곳과 바뀌는 점
 
@@ -19,13 +19,13 @@ CICD는 배포만을 진행하고 Ingress는 배포되고 있는 서비스명과
 | lily-loadbalancer `manifests/` | 사람이 `kubectl apply` | 앱 Ingress 는 `POST /hosts` 로. 플랫폼 Ingress 는 `PUT /routes` 로 등록 |
 | lily-builder `deploy/k3s/lily-builder-burst.yaml` | loadbalancer 와 같은 이름의 옛 버전 | 삭제 |
 
-## lily-ingress API
+## lily-router API
 
-코드 기준: [RouteController](../src/main/java/com/lily/ingress/route/RouteController.java), 요청·응답 타입 [RouteModels](../src/main/java/com/lily/ingress/route/dto/), 오류 [ApiExceptionHandler](../src/main/java/com/lily/ingress/route/ApiExceptionHandler.java).
+코드 기준: [RouteController](../src/main/java/com/lily/router/route/RouteController.java), 요청·응답 타입 [RouteModels](../src/main/java/com/lily/router/route/dto/), 오류 [ApiExceptionHandler](../src/main/java/com/lily/router/route/ApiExceptionHandler.java).
 필드별 자세한 규칙과 예시는 [protocol.md](<api/02-Ingress Nginx API Details.md>) 에 있습니다.
 
-- 주소: `http://lily-ingress.lily-system.svc` (클러스터 안)
-- `/api/` 아래는 모두 `Authorization: Bearer {LILY_INGRESS_API_TOKEN}` 필요. 없거나 다르면 `401 UNAUTHORIZED`
+- 주소: `http://lily-router.lily-system.svc` (클러스터 안)
+- `/api/` 아래는 모두 `Authorization: Bearer {LILY_ROUTER_API_TOKEN}` 필요. 없거나 다르면 `401 UNAUTHORIZED`
 - 요청·응답 본문은 JSON
 
 ### 경로와 반환값
@@ -45,7 +45,7 @@ CICD는 배포만을 진행하고 Ingress는 배포되고 있는 서비스명과
 | `GET` | `/healthz` | - | `200` `{"status":"ok"}` (토큰 불필요) | - | k8s probe |
 
 - `{app}` 은 소문자·숫자·하이픈, 48자 이하. `{namespace}` 는 DNS 라벨 형식. 어기면 `400`
-- lily-ingress 가 만들지 않은 Ingress(`managed-by` 레이블 없음)는 조회되지 않습니다 (`404`). 처음 `PUT /routes` 를 할 때 이어받습니다
+- lily-router 가 만들지 않은 Ingress(`managed-by` 레이블 없음)는 조회되지 않습니다 (`404`). 처음 `PUT /routes` 를 할 때 이어받습니다
 
 ### 요청 본문
 
@@ -100,8 +100,8 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.web.client.RestClient;
 
 /**
- * lily-ingress 에 라우트를 등록한다. Ingress 를 직접 만들지 않는다.
- * 프로토콜: team-lily-ingress docs/protocol.md
+ * lily-router 에 라우트를 등록한다. Ingress 를 직접 만들지 않는다.
+ * 프로토콜: lily-router docs/protocol.md
  */
 public final class HttpTrafficRouter implements TrafficRouter {
 
@@ -161,19 +161,19 @@ public class RouterModuleConfiguration {
 
 ```yaml
 - name: LILY_ROUTER_URL
-  value: http://lily-ingress.lily-system.svc
+  value: http://lily-router.lily-system.svc
 - name: LILY_ROUTER_API_TOKEN
   valueFrom:
     secretKeyRef:
-      name: lily-ingress-token
-      key: LILY_INGRESS_API_TOKEN
+      name: lily-router-token
+      key: LILY_ROUTER_API_TOKEN
 ```
 
 주의:
-- cicd 의 `appName` 은 55자까지 허용하지만 lily-ingress 는 48자까지입니다 (`-canary-ingress` 접미사). cicd 쪽 제한도 48로 맞춥니다.
-- 지금 cicd 응답의 `targetHostUrl` 은 엔진이 `url-scheme + host` 로 만듭니다. 같은 값이 나오지만, 장기적으로는 lily-ingress 응답의 `url` 을 쓰는 편이 맞습니다 (`TrafficRouter` 반환 타입 변경 필요).
+- cicd 의 `appName` 은 55자까지 허용하지만 lily-router 는 48자까지입니다 (`-canary-ingress` 접미사). cicd 쪽 제한도 48로 맞춥니다.
+- 지금 cicd 응답의 `targetHostUrl` 은 엔진이 `url-scheme + host` 로 만듭니다. 같은 값이 나오지만, 장기적으로는 lily-router 응답의 `url` 을 쓰는 편이 맞습니다 (`TrafficRouter` 반환 타입 변경 필요).
 
-## 2단계: canary 와 조회도 lily-ingress 로
+## 2단계: canary 와 조회도 lily-router 로
 
 - `CanaryAnalysis.createIngress` → `PUT /api/v1/routes/{ns}/{app}/canary` `{serviceName: "{app}-canary-svc", weight}`
 - `CanaryAnalysis.cleanup` → `DELETE /api/v1/routes/{ns}/{app}/canary`
@@ -184,18 +184,18 @@ public class RouterModuleConfiguration {
 
 - lily-cicd ClusterRole 의 `ingresses` 에서 `create, update, patch, delete` 를 뺍니다
 - lily-builder ClusterRole 의 `ingresses get` 도 `GET /routes` 로 바꾼 뒤 뺍니다
-- 그 뒤로는 lily-ingress 외에는 Ingress 를 쓸 수 없습니다
+- 그 뒤로는 lily-router 외에는 Ingress 를 쓸 수 없습니다
 
 ## 기존 Ingress 옮기기
 
-lily-ingress 를 배포한 뒤, 기존 앱은 다음 배포 때 `PUT /routes` 가 불리면서 자동으로 옮겨집니다.
+lily-router 를 배포한 뒤, 기존 앱은 다음 배포 때 `PUT /routes` 가 불리면서 자동으로 옮겨집니다.
 배포 전에 바로 옮기려면 직접 등록합니다. 기존 `{app}-ingress` 의 nip.io 호스트는 추가 주소로 이어받습니다.
 
 ```bash
 # 클러스터 안에서 (예: kubectl run 으로 임시 파드) 또는 port-forward 후
 TOKEN=...
 for app in blog blog2 lily-test; do
-  curl -s -X PUT http://lily-ingress.lily-system.svc/api/v1/routes/default/$app \
+  curl -s -X PUT http://lily-router.lily-system.svc/api/v1/routes/default/$app \
     -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
     -d "{\"serviceName\":\"$app-svc\"}"
 done
@@ -206,7 +206,7 @@ done
 
 ```bash
 kubectl -n lily-system delete ingress lily-builder-burst
-curl -s -X PUT http://lily-ingress.lily-system.svc/api/v1/routes/lily-system/lily-builder \
+curl -s -X PUT http://lily-router.lily-system.svc/api/v1/routes/lily-system/lily-builder \
   -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{
     "serviceName": "lily-builder",
     "host": "builder.apps.lilycloud.kr",
@@ -220,4 +220,4 @@ curl -s -X PUT http://lily-ingress.lily-system.svc/api/v1/routes/lily-system/lil
 
 - 라우트 하나의 모든 주소는 **같은 경로 목록**을 씁니다. `builder` 처럼 주소마다 열린 경로가 다르면 하나로 맞추거나 앱을 나눠 등록합니다.
 - 레플리카는 1개 기준입니다 (같은 앱 갱신을 프로세스 안에서 직렬화).
-- 실제 프록시는 여전히 ingress-nginx 입니다. 자체 컨트롤러로 바꿀 때는 `LILY_INGRESS_INGRESS_CLASS` 만 바꾸면 됩니다.
+- 실제 프록시는 여전히 ingress-nginx 입니다. 자체 컨트롤러로 바꿀 때는 `LILY_ROUTER_INGRESS_CLASS` 만 바꾸면 됩니다.

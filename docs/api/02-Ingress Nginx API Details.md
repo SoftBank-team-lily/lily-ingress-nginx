@@ -1,14 +1,14 @@
-# lily-ingress 프로토콜 v1
+# lily-router 프로토콜 v1
 
-다른 모듈이 lily-ingress 와 통신하는 규칙입니다. 이 문서와 [dto/](../../src/main/java/com/lily/ingress/route/dto/) 를 같이 고칩니다.
+다른 모듈이 lily-router 와 통신하는 규칙입니다. 이 문서와 [dto/](../../src/main/java/com/lily/router/route/dto/) 를 같이 고칩니다.
 
 ## 공통
 
 | 항목 | 값 |
 |---|---|
-| 주소 | 클러스터 안: `http://lily-ingress.lily-system.svc` (포트 80 → 컨테이너 8075) |
+| 주소 | 클러스터 안: `http://lily-router.lily-system.svc` (포트 80 → 컨테이너 8075) |
 | 형식 | JSON (`Content-Type: application/json`) |
-| 인증 | `Authorization: Bearer {LILY_INGRESS_API_TOKEN}`. `/api/` 아래 전부. `/healthz` 는 제외 |
+| 인증 | `Authorization: Bearer {LILY_ROUTER_API_TOKEN}`. `/api/` 아래 전부. `/healthz` 는 제외 |
 | 버전 | 경로의 `/api/v1`. 필드를 지우거나 뜻을 바꾸면 `/api/v2` 를 연다. 필드 추가는 v1 안에서 한다 (받는 쪽은 모르는 필드를 무시) |
 | 식별자 | 라우트 하나 = `{namespace}/{app}`. `app` 은 소문자·숫자·하이픈, 48자 이하 |
 
@@ -28,7 +28,7 @@
 
 ---
 
-## 1. 배포 모듈 → lily-ingress
+## 1. 배포 모듈 → lily-router
 
 ### 라우트 등록 (배포 완료 후)
 
@@ -62,7 +62,7 @@
 규칙:
 - `host` 는 **기본 주소**입니다. 배포할 때마다 바뀔 수 있고, 바뀌면 이전 기본 주소는 빠집니다.
 - 추가 주소(`/hosts` 로 넣은 것)는 재배포해도 남습니다.
-- 처음 등록할 때 lily-ingress 가 만들지 않은 `{app}-ingress` 가 이미 있으면, 그 Ingress 의 호스트를 추가 주소로 이어받습니다 (lily-cicd 가 만든 Ingress 를 옮겨 올 때).
+- 처음 등록할 때 lily-router 가 만들지 않은 `{app}-ingress` 가 이미 있으면, 그 Ingress 의 호스트를 추가 주소로 이어받습니다 (lily-cicd 가 만든 Ingress 를 옮겨 올 때).
 
 ### 배포 상태 갱신
 
@@ -90,7 +90,7 @@
 
 ---
 
-## 2. 운영자·다른 모듈 → lily-ingress
+## 2. 운영자·다른 모듈 → lily-router
 
 ### 추가 주소
 
@@ -146,7 +146,7 @@ nip.io, 커스텀 도메인처럼 기본 주소 외에 받을 주소. 기본 주
 ## 3. 흐름 예시 (블루그린 배포)
 
 ```
-lily-cicd                                   lily-ingress
+lily-cicd                                   lily-router
   │ PUT .../blog/deployment {status:DEPLOYING}  →  (라우트가 있으면 기록)
   │ 슬롯 green 배포, Ready 대기
   │ PUT .../blog/canary {blog-canary-svc, 10}   →  blog-canary-ingress 생성

@@ -1,15 +1,15 @@
-# lily-ingress API 명세 (v1)
+# lily-router API 명세 (v1)
 
-코드 기준: [RouteController](../../src/main/java/com/lily/ingress/route/RouteController.java) · 요청·응답 타입 [dto/](../../src/main/java/com/lily/ingress/route/dto/) (`request/`, `response/`, 공용 `PathRule`·`DeploymentInfo`) · [ApiExceptionHandler](../../src/main/java/com/lily/ingress/route/ApiExceptionHandler.java) · [HealthController](../../src/main/java/com/lily/ingress/route/HealthController.java)
+코드 기준: [RouteController](../../src/main/java/com/lily/router/route/RouteController.java) · 요청·응답 타입 [dto/](../../src/main/java/com/lily/router/route/dto/) (`request/`, `response/`, 공용 `PathRule`·`DeploymentInfo`) · [ApiExceptionHandler](../../src/main/java/com/lily/router/route/ApiExceptionHandler.java) · [HealthController](../../src/main/java/com/lily/router/route/HealthController.java)
 
 ## 공통
 
 | 항목 | 값 |
 |---|---|
-| Base URL | `http://lily-ingress.lily-system.svc` (클러스터 안, Service 80 → 컨테이너 8075) |
+| Base URL | `http://lily-router.lily-system.svc` (클러스터 안, Service 80 → 컨테이너 8075) |
 | 로컬 | `http://localhost:8075` |
 | 형식 | `Content-Type: application/json` |
-| 인증 | `/api/` 아래 전부 `Authorization: Bearer {LILY_INGRESS_API_TOKEN}`. 서버에 토큰이 설정되지 않았으면 검사하지 않음 |
+| 인증 | `/api/` 아래 전부 `Authorization: Bearer {LILY_ROUTER_API_TOKEN}`. 서버에 토큰이 설정되지 않았으면 검사하지 않음 |
 | 경로 변수 | `{namespace}`: 소문자·숫자·하이픈, 63자 이하 / `{app}`: 소문자·숫자·하이픈, 48자 이하 / `{host}`: DNS 이름 |
 
 ## 엔드포인트 목록
@@ -48,7 +48,7 @@
 | `deployment` | `DeploymentInfo` | | 조회용으로만 보관 |
 
 ```bash
-curl -X PUT http://lily-ingress.lily-system.svc/api/v1/routes/default/blog \
+curl -X PUT http://lily-router.lily-system.svc/api/v1/routes/default/blog \
   -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
   -d '{
     "serviceName": "blog-svc",
@@ -62,7 +62,7 @@ curl -X PUT http://lily-ingress.lily-system.svc/api/v1/routes/default/blog \
 
 동작:
 - `host` 가 바뀌면 이전 기본 주소는 빠지고, 추가 주소(#6)는 그대로 남습니다
-- lily-ingress 가 만들지 않은 `{app}-ingress` 가 이미 있으면 그 호스트를 추가 주소로 이어받습니다
+- lily-router 가 만들지 않은 `{app}-ingress` 가 이미 있으면 그 호스트를 추가 주소로 이어받습니다
 - canary 가 열려 있으면 canary 도 새 호스트·경로를 따라갑니다
 
 | 실패 | code | 예 |
@@ -82,7 +82,7 @@ curl -X PUT http://lily-ingress.lily-system.svc/api/v1/routes/default/blog \
 |---|---|---|
 | `namespace` | | 비우면 전체 namespace |
 
-**응답** `200` [`Route`](#route)`[]`. `namespace`, `app` 순으로 정렬. lily-ingress 가 관리하는 라우트만 포함
+**응답** `200` [`Route`](#route)`[]`. `namespace`, `app` 순으로 정렬. lily-router 가 관리하는 라우트만 포함
 
 | 실패 | code |
 |---|---|
@@ -99,7 +99,7 @@ curl -X PUT http://lily-ingress.lily-system.svc/api/v1/routes/default/blog \
 | 실패 | code | 예 |
 |---|---|---|
 | 400 | `INVALID_REQUEST` | 이름 형식 |
-| 404 | `ROUTE_NOT_FOUND` | 라우트 없음 (lily-ingress 가 만들지 않은 Ingress 포함) |
+| 404 | `ROUTE_NOT_FOUND` | 라우트 없음 (lily-router 가 만들지 않은 Ingress 포함) |
 
 ---
 
@@ -304,7 +304,7 @@ GET /api/v1/hosts/blog.apps.lilycloud.kr
 
 ### DeploymentInfo
 
-모든 필드 선택. lily-ingress 는 값을 해석하지 않고 그대로 보관합니다.
+모든 필드 선택. lily-router 는 값을 해석하지 않고 그대로 보관합니다.
 
 | 필드 | 타입 | 예 |
 |---|---|---|
